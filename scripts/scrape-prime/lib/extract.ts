@@ -3,14 +3,15 @@
  *
  * Стратегія:
  * 1) Шукаємо JSON-LD `Product` — найнадійніше джерело (schema.org).
- * 2) Доповнюємо CSS-селекторами для тих полів, яких немає в JSON-LD.
- * 3) Якщо щось не знайдено — лишаємо null/undefined; transform-крок це обробить.
- *
- * ВАЖЛИВО: CSS-селектори зі змінних `FALLBACK_*` нижче можуть потребувати
- * налаштування під реальну розмітку сайту після першого тестового запуску.
+ * 2) Wix має нестандартний JSON-LD: `Offers` з великої, `image` як ImageObject з
+ *    полем `contentUrl`, `Availability` з великої.
+ * 3) Якщо в JSON-LD немає бренду — використовуємо `seller.name` або дефолт.
+ * 4) Опис нормалізуємо через cheerio (декод HTML-entities + strip тегів).
  */
 import * as cheerio from "cheerio";
 import type { CheerioAPI } from "cheerio";
+
+const DEFAULT_BRAND = "PRIME Technics";
 
 export interface RawProduct {
   url: string;
@@ -29,36 +30,31 @@ export interface RawProduct {
   attributes: { name: string; value: string }[];
 }
 
-interface JsonLdProduct {
-  "@type"?: string | string[];
-  name?: string;
-  sku?: string;
-  mpn?: string;
-  productID?: string;
-  brand?: { name?: string } | string;
-  description?: string;
-  image?: string | string[];
-  offers?: {
-    price?: string | number;
-    priceCurrency?: string;
-    availability?: string;
-  } | Array<{
-    price?: string | number;
-    priceCurrency?: string;
-    availability?: string;
-  }>;
-  additionalProperty?: Array<{ name?: string; value?: string }>;
-  category?: string;
+// Wix не дотримується точно schema.org регістру (Offers, Availability — з великої).
+// Тому всі поля парсимо через case-insensitive lookup.
+type AnyObj = Record<string, unknown>;
+
+function pick<T = unknown>(obj: AnyObj | null | undefined, ...keys: string[]): T | undefined {
+  if (!obj) return undefined;
+  for (const k of keys) {
+    if (k in obj && obj[k] != null) return obj[k] as T;
+    // case-insensitive
+    const lower = k.toLowerCase();
+    for (const ok of Object.keys(obj)) {
+      if (ok.toLowerCase() === lower && obj[ok] != null) return obj[ok] as T;
+    }
+  }
+  return undefined;
 }
 
-function isProductLd(obj: unknown): obj is JsonLdProduct {
+function isProductLd(obj: unknown): obj is AnyObj {
   if (!obj || typeof obj !== "object") return false;
-  const t = (obj as JsonLdProduct)["@type"];
+  const t = (obj as AnyObj)["@type"];
   if (Array.isArray(t)) return t.includes("Product");
   return t === "Product";
 }
 
-function findProductLd($: CheerioAPI): JsonLdProduct | null {
+function findProductLd($: CheerioAPI): AnyObj | null {
   const nodes = $('script[type="application/ld+json"]').toArray();
   for (const node of nodes) {
     const text = $(node).text().trim();
@@ -69,17 +65,69 @@ function findProductLd($: CheerioAPI): JsonLdProduct | null {
     } catch {
       continue;
     }
-    // Може бути об'єкт, масив, або @graph
     const candidates: unknown[] = Array.isArray(parsed)
       ? parsed
       : (parsed as { "@graph"?: unknown[] })["@graph"]
-        ? (parsed as { "@graph": unknown[] })["@graph"]
+        ? ((parsed as { "@graph": unknown[] })["@graph"] as unknown[])
         : [parsed];
     for (const c of candidates) {
-      if (isProductLd(c)) return c;
+      if (isProductLd(c)) return c as AnyObj;
     }
   }
   return null;
+}
+
+/**
+ * Wix віддає зображення в URL виду
+ *   .../w_500,h_500,q_90/file.png
+ * Збільшуємо до 1200 — для каталогу/картки треба краща роздільність.
+ */
+function upscaleWixImage(url: string): string {
+  return url.replace(/\/w_\d+,h_\d+,q_\d+\//, "/w_1200,h_1200,q_90/");
+}
+
+/**
+ * Витягає всі URL зображень з поля JSON-LD `image`. Wix дає масив ImageObject
+ * з полем `contentUrl`, але також підтримуємо звичайні рядки.
+ */
+function extractImageUrls(image: unknown, base: string): string[] {
+  if (!image) return [];
+  const out: string[] = [];
+  const stack: unknown[] = [image];
+  while (stack.length) {
+    const item = stack.pop();
+    if (!item) continue;
+    if (typeof item === "string") {
+      out.push(absoluteUrl(item, base));
+      continue;
+    }
+    if (Array.isArray(item)) {
+      for (const x of item) stack.push(x);
+      continue;
+    }
+    if (typeof item === "object") {
+      const obj = item as AnyObj;
+      const url = pick<string>(obj, "contentUrl", "url", "@id");
+      if (typeof url === "string") {
+        out.push(absoluteUrl(url, base));
+      }
+    }
+  }
+  // Дедуплікація + збільшення роздільності для Wix CDN
+  const unique = new Set(
+    out.map((u) => (u.includes("wixstatic.com") ? upscaleWixImage(u) : u)),
+  );
+  return [...unique];
+}
+
+/**
+ * Декодує HTML-entities (&#009;, &amp; тощо) і прибирає теги.
+ */
+function decodeHtmlText(input: string | null | undefined): string | null {
+  if (!input) return null;
+  const $ = cheerio.load(`<div>${input}</div>`);
+  const text = $("div").text().replace(/\s+/g, " ").trim();
+  return text || null;
 }
 
 function toNumber(value: unknown): number | null {
@@ -119,52 +167,57 @@ export function parseProduct(html: string, url: string): RawProduct {
 
   // ---------- Назва ----------
   const name =
-    ld?.name?.trim() ||
+    pick<string>(ld, "name")?.trim() ||
     $(FALLBACK.name).first().text().trim() ||
     $("title").text().trim();
 
   // ---------- SKU ----------
   const sku =
-    ld?.sku ||
-    ld?.mpn ||
-    ld?.productID ||
+    pick<string>(ld, "sku", "mpn", "productID") ||
     $(FALLBACK.sku).first().text().trim() ||
     null;
 
   // ---------- Бренд ----------
+  // Wix: справжнього бренду в JSON-LD немає, але є seller.name = "PRIME Technics"
   let brand: string | null = null;
-  if (ld?.brand) {
-    brand = typeof ld.brand === "string" ? ld.brand : ld.brand.name ?? null;
+  const ldBrand = pick<unknown>(ld, "brand");
+  if (typeof ldBrand === "string") brand = ldBrand;
+  else if (ldBrand && typeof ldBrand === "object") {
+    brand = pick<string>(ldBrand as AnyObj, "name") ?? null;
   }
   if (!brand) {
-    brand = $(FALLBACK.brand).first().text().trim() || null;
+    const offers = pick<AnyObj>(ld, "offers", "Offers");
+    const seller = pick<AnyObj>(offers, "seller");
+    brand = pick<string>(seller, "name") ?? null;
+  }
+  if (!brand) {
+    brand = $(FALLBACK.brand).first().text().trim() || DEFAULT_BRAND;
   }
 
   // ---------- Опис ----------
   const description_short =
-    ld?.description?.trim() ||
-    $(FALLBACK.shortDesc).first().text().trim() ||
+    decodeHtmlText(pick<string>(ld, "description")) ||
+    decodeHtmlText($(FALLBACK.shortDesc).first().text()) ||
     null;
   const description_full =
-    $(FALLBACK.fullDesc).first().html()?.trim() || description_short;
+    decodeHtmlText($(FALLBACK.fullDesc).first().html()) || description_short;
 
-  // ---------- Ціна ----------
+  // ---------- Ціна та наявність ----------
   let retail_price: number | null = null;
   let currency: string | null = null;
   let in_stock: boolean | null = null;
-  if (ld?.offers) {
-    const offer = Array.isArray(ld.offers) ? ld.offers[0] : ld.offers;
-    retail_price = toNumber(offer?.price);
-    currency = offer?.priceCurrency ?? null;
-    if (offer?.availability) {
-      in_stock = /InStock/i.test(offer.availability);
-    }
+  const offer = pick<AnyObj | AnyObj[]>(ld, "offers", "Offers");
+  const firstOffer = Array.isArray(offer) ? (offer[0] as AnyObj) : offer;
+  if (firstOffer) {
+    retail_price = toNumber(pick(firstOffer, "price"));
+    currency = pick<string>(firstOffer, "priceCurrency") ?? null;
+    const avail = pick<string>(firstOffer, "availability", "Availability");
+    if (avail) in_stock = /InStock/i.test(avail);
   }
   if (retail_price == null) {
     retail_price = toNumber($(FALLBACK.price).first().text());
   }
   const promo_price = toNumber($(FALLBACK.oldPrice).first().text());
-  // Якщо є "стара ціна" — вона була до знижки, тож swap
   let finalRetail = retail_price;
   let finalPromo: number | null = null;
   if (promo_price != null && retail_price != null && promo_price > retail_price) {
@@ -173,11 +226,8 @@ export function parseProduct(html: string, url: string): RawProduct {
   }
 
   // ---------- Фото ----------
-  const imageSet = new Set<string>();
-  if (ld?.image) {
-    const arr = Array.isArray(ld.image) ? ld.image : [ld.image];
-    for (const img of arr) imageSet.add(absoluteUrl(img, url));
-  }
+  const ldImages = extractImageUrls(pick(ld, "image"), url);
+  const imageSet = new Set<string>(ldImages);
   $(FALLBACK.images).each((_, el) => {
     const src =
       $(el).attr("data-src") || $(el).attr("data-original") || $(el).attr("src");
@@ -187,13 +237,14 @@ export function parseProduct(html: string, url: string): RawProduct {
   });
   const images = [...imageSet];
 
-  // ---------- Категорія ----------
+  // ---------- Категорія (breadcrumbs) ----------
+  // У Wix breadcrumbs зазвичай рендеряться JS — у статичному HTML їх немає.
+  // Категорії будемо приписувати окремим етапом (з category-pages).
   const category_path: string[] = [];
   $(FALLBACK.breadcrumbs).each((_, el) => {
     const t = $(el).text().trim();
     if (t && t.toLowerCase() !== "головна") category_path.push(t);
   });
-  // Видаляємо назву товару з кінця хлібних крихт, якщо вона там є
   if (
     category_path.length > 0 &&
     name &&
@@ -201,15 +252,19 @@ export function parseProduct(html: string, url: string): RawProduct {
   ) {
     category_path.pop();
   }
-  if (category_path.length === 0 && ld?.category) {
-    category_path.push(ld.category);
+  const ldCategory = pick<string>(ld, "category");
+  if (category_path.length === 0 && ldCategory) {
+    category_path.push(ldCategory);
   }
 
   // ---------- Характеристики ----------
   const attributes: { name: string; value: string }[] = [];
-  if (ld?.additionalProperty) {
-    for (const p of ld.additionalProperty) {
-      if (p.name && p.value) attributes.push({ name: p.name, value: p.value });
+  const addProps = pick<Array<AnyObj>>(ld, "additionalProperty");
+  if (Array.isArray(addProps)) {
+    for (const p of addProps) {
+      const n = pick<string>(p, "name");
+      const v = pick<string>(p, "value");
+      if (n && v) attributes.push({ name: n, value: v });
     }
   }
   if (attributes.length === 0) {
@@ -222,7 +277,6 @@ export function parseProduct(html: string, url: string): RawProduct {
         n = $(cells[0]).text().trim();
         v = $(cells[1]).text().trim();
       } else {
-        // li → "Назва: Значення"
         const text = $el.text().trim();
         const idx = text.indexOf(":");
         if (idx > 0) {
