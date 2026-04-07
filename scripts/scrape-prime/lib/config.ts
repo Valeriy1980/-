@@ -16,6 +16,15 @@ export const CONFIG = {
   retries: 3,
   timeoutMs: 30_000,
 
+  /**
+   * Регулярка, що ідентифікує товарну сторінку.
+   * Wix Stores: /product-page/<slug>
+   * Shopify:    /products/<slug>
+   * WooCommerce: /product/<slug>
+   * Якщо null — використовується загальна евристика з looksLikeProductUrl().
+   */
+  productUrlPattern: /\/product-page\//,
+
   // Куди складати артефакти
   dataDir: path.join(ROOT, "data", "prime"),
   imagesDir: path.join(ROOT, "public", "imported"),

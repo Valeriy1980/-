@@ -57,26 +57,30 @@ async function expandSitemap(url: string, into: Set<string>) {
 }
 
 /**
- * Евристика: чи URL схожий на товарний.
- * Налаштувати після першого запуску, коли побачимо реальні URL.
+ * Чи URL — товарна сторінка.
+ *
+ * Якщо в config задано productUrlPattern (як для Wix/Shopify/Woo) — використовуємо його.
+ * Інакше — більш розпливчаста евристика.
  */
 function looksLikeProductUrl(url: string): boolean {
+  if (CONFIG.productUrlPattern) {
+    return CONFIG.productUrlPattern.test(url);
+  }
+
   const lower = url.toLowerCase();
-  // Виключаємо очевидно НЕ товарні
   if (/\.(jpg|jpeg|png|gif|webp|pdf|css|js|xml)(\?|$)/.test(lower)) return false;
-  if (/\/(blog|news|page|category|categor|brand|search|cart|account|login|sitemap)/.test(
+  if (/\/(blog|news|category|categor|brand|search|cart|account|login|sitemap)\b/.test(
       lower,
   )) {
     return false;
   }
-  // Простий ствердник: URL має хоча б 2 сегменти й закінчується чимось схожим на slug
   try {
     const u = new URL(url);
     const segments = u.pathname.split("/").filter(Boolean);
     if (segments.length < 1) return false;
-    const last = segments[segments.length - 1];
-    // slug: букви/цифри/дефіс, не порожній
-    return /^[\w-]+$/.test(last) && last.length >= 3;
+    const last = decodeURIComponent(segments[segments.length - 1]);
+    // Підтримка кирилиці через Unicode property escapes
+    return /^[\p{L}\p{N}_-]+$/u.test(last) && last.length >= 3;
   } catch {
     return false;
   }
