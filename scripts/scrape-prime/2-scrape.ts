@@ -5,6 +5,7 @@
  *   запуску використовує кешований HTML, якщо він є).
  * - Записує products.json після кожних N товарів (чекпойнт).
  */
+import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { CONFIG, dataPath, rawHtmlPath } from "./lib/config";
@@ -25,14 +26,29 @@ interface ProductsFile {
   products: RawProduct[];
 }
 
+/**
+ * URL → ім'я файла кешу. Кирилиця після URL-encode займає по 9 байт на символ,
+ * а APFS обмежує ім'я файла 255 байтами. Якщо повне ім'я задовге — беремо
+ * прелікс + хеш URL для унікальності.
+ */
 function urlToSlug(url: string): string {
+  let raw: string;
   try {
     const u = new URL(url);
     const segments = u.pathname.split("/").filter(Boolean);
-    return segments.join("__") || "index";
+    raw = segments.join("__") || "index";
   } catch {
-    return url.replace(/[^\w]+/g, "_");
+    raw = url.replace(/[^\w]+/g, "_");
   }
+  // У файловій системі ім'я зберігається як у JS-рядку — тобто Cyrillic-літери
+  // це 2 байти у UTF-8. Але fs.writeFile може отримати percent-encoded форму
+  // через інші бібліотеки. Заради надійності рахуємо саме байти UTF-8.
+  const byteLen = Buffer.byteLength(raw, "utf8");
+  if (byteLen <= 200) return raw;
+  const hash = crypto.createHash("sha1").update(url).digest("hex").slice(0, 12);
+  // Беремо перші 150 байт як префікс (обережно щоб не порізати посеред UTF-8 char)
+  const prefix = Buffer.from(raw, "utf8").slice(0, 150).toString("utf8");
+  return `${prefix}__${hash}`;
 }
 
 async function loadOrFetchHtml(url: string): Promise<string> {
