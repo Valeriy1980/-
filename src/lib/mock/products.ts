@@ -22,6 +22,7 @@ interface MockProduct extends Product {
   brand: Brand;
   category: Category;
   main_image: ProductImage;
+  images: string[];
 }
 
 const make = (
@@ -66,6 +67,7 @@ const make = (
       sort_order: 0,
       is_main: true,
     },
+    images: [],
   };
 };
 

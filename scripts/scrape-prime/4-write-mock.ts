@@ -17,6 +17,16 @@ interface ProductsFile {
   products: (RawProduct & { local_images?: string[] })[];
 }
 
+interface CategoriesFile {
+  total: number;
+  categories: Array<{
+    slug: string;
+    name: string;
+    url: string;
+    productUrls: string[];
+  }>;
+}
+
 function slugify(input: string): string {
   return input
     .toLowerCase()
@@ -37,6 +47,30 @@ async function main() {
     process.exit(1);
   }
 
+  // Опціонально: мапа категорій, отримана зі сторінок категорій (5-categories)
+  const catData = await readJson<CategoriesFile | null>(
+    dataPath("categories"),
+    null,
+  );
+  // productUrl → categorySlug (перша знайдена категорія для товару)
+  const productToCategorySlug = new Map<string, string>();
+  if (catData) {
+    for (const cat of catData.categories) {
+      for (const pUrl of cat.productUrls) {
+        if (!productToCategorySlug.has(pUrl)) {
+          productToCategorySlug.set(pUrl, cat.slug);
+        }
+      }
+    }
+    console.log(
+      `  ℹ Завантажено ${catData.categories.length} категорій, прив'язано ${productToCategorySlug.size} товарів`,
+    );
+  } else {
+    console.log(
+      "  ⚠ data/prime/categories.json відсутній — товари будуть без категорій. Запусти 'npm run scrape:categories'.",
+    );
+  }
+
   // ----- Категорії та бренди -----
   const categoriesMap = new Map<
     string,
@@ -47,22 +81,57 @@ async function main() {
   let catCounter = 0;
   let brandCounter = 0;
 
-  function ensureCategory(path: string[]): string {
-    // Беремо найглибший рівень як категорію товару
-    const last = path[path.length - 1];
-    if (!last) return "uncategorized";
-    const slug = slugify(last);
-    if (!categoriesMap.has(slug)) {
+  // Додаємо всі категорії з categories.json як готові
+  if (catData) {
+    for (const cat of catData.categories) {
       catCounter++;
-      categoriesMap.set(slug, {
+      categoriesMap.set(cat.slug, {
         id: `c${catCounter}`,
-        name: last,
-        slug,
+        name: cat.name,
+        slug: cat.slug,
         parent_id: null,
         sort_order: catCounter,
       });
     }
-    return categoriesMap.get(slug)!.id;
+  }
+
+  /**
+   * Призначає category_id товару:
+   * 1. Якщо є мапа з categories.json — беремо її
+   * 2. Інакше — використовуємо category_path з парсингу breadcrumbs
+   * 3. Інакше — "uncategorized"
+   */
+  function categoryIdForProduct(productUrl: string, fallbackPath: string[]): string {
+    const slug = productToCategorySlug.get(productUrl);
+    if (slug && categoriesMap.has(slug)) {
+      return categoriesMap.get(slug)!.id;
+    }
+    const last = fallbackPath[fallbackPath.length - 1];
+    if (!last) return "uncategorized";
+    const fSlug = slugify(last);
+    if (!categoriesMap.has(fSlug)) {
+      catCounter++;
+      categoriesMap.set(fSlug, {
+        id: `c${catCounter}`,
+        name: last,
+        slug: fSlug,
+        parent_id: null,
+        sort_order: catCounter,
+      });
+    }
+    return categoriesMap.get(fSlug)!.id;
+  }
+
+  // Гарантуємо наявність "Без категорії" як фолбеку для товарів без категорій.
+  if (!categoriesMap.has("uncategorized")) {
+    catCounter++;
+    categoriesMap.set("uncategorized", {
+      id: `c${catCounter}`,
+      name: "Без категорії",
+      slug: "uncategorized",
+      parent_id: null,
+      sort_order: 9999,
+    });
   }
 
   function ensureBrand(name: string | null | undefined): string {
@@ -110,7 +179,7 @@ async function main() {
     while (usedSlugs.has(slug)) slug = `${baseSlug}-${n++}`;
     usedSlugs.add(slug);
 
-    const category_id = ensureCategory(p.category_path);
+    const category_id = categoryIdForProduct(p.url, p.category_path);
     const brand_id = ensureBrand(p.brand);
     const now = new Date().toISOString();
 

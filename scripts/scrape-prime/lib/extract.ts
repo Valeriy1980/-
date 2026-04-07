@@ -78,12 +78,20 @@ function findProductLd($: CheerioAPI): AnyObj | null {
 }
 
 /**
- * Wix віддає зображення в URL виду
- *   .../w_500,h_500,q_90/file.png
- * Збільшуємо до 1200 — для каталогу/картки треба краща роздільність.
+ * Wix віддає зображення з різними варіантами трансформації:
+ *   .../v1/fit/w_500,h_500,q_90/file.png
+ *   .../v1/fill/w_50,h_50,al_c,q_85/file.jpg
+ *   .../v1/crop/x_0,y_0,w_500,h_500/file.png
+ *   .../media/<hash>~mv2.png            (без transform)
+ *
+ * Уніфікуємо: відкидаємо існуючий /v1/.../file.X сегмент і додаємо
+ * fit/w_1200,h_1200,q_90/file.<ext>. Розширення беремо з base URL.
  */
 function upscaleWixImage(url: string): string {
-  return url.replace(/\/w_\d+,h_\d+,q_\d+\//, "/w_1200,h_1200,q_90/");
+  // Видаляємо існуючу transform-частину
+  const stripped = url.replace(/\/v1\/[^/]+\/[^/]+\/file\.\w+$/i, "");
+  const ext = stripped.match(/\.([a-z]+)$/i)?.[1]?.toLowerCase() ?? "jpg";
+  return `${stripped}/v1/fit/w_1200,h_1200,q_90/file.${ext}`;
 }
 
 /**
