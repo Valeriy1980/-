@@ -132,7 +132,12 @@ async function main() {
       promo_price: p.promo_price ?? null,
       created_at: now,
       updated_at: now,
-      images: p.local_images ?? [],
+      // Якщо локальні фото ще не завантажені (scrape:images не запущено) —
+      // використовуємо оригінальні URL з Wix CDN. Це дає миттєвий результат
+      // у каталозі без потреби качати ~2300 фото на диск.
+      images: (p.local_images && p.local_images.length > 0
+        ? p.local_images
+        : p.images) ?? [],
     });
   }
 
