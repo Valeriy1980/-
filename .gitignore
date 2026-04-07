@@ -12,3 +12,7 @@ dist
 next-env.d.ts
 .tsbuildinfo
 *.tsbuildinfo
+
+# Артефакти краулера: сирий HTML і робочі JSON
+/data/prime/raw/
+/data/prime/*.log

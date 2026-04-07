@@ -36,7 +36,7 @@ function PriceBlock({ product }: { product: MockProduct }) {
 }
 
 function Thumb({ product, className }: { product: MockProduct; className?: string }) {
-  // Placeholder zone — буде Next/Image після підключення Storage.
+  const src = product.main_image?.image_url || "";
   return (
     <div
       className={cn(
@@ -44,9 +44,19 @@ function Thumb({ product, className }: { product: MockProduct; className?: strin
         className,
       )}
     >
-      <span className="px-4 text-center text-xs uppercase tracking-wide text-slate-400">
-        {product.brand.name}
-      </span>
+      {src ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={src}
+          alt={product.name}
+          loading="lazy"
+          className="h-full w-full object-contain p-3"
+        />
+      ) : (
+        <span className="px-4 text-center text-xs uppercase tracking-wide text-slate-400">
+          {product.brand.name}
+        </span>
+      )}
       <div className="absolute left-2 top-2 flex flex-col gap-1">
         {product.is_new && <Badge>Новинка</Badge>}
         {product.is_promo && <Badge variant="accent">Акція</Badge>}

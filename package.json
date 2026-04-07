@@ -7,7 +7,12 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "type-check": "tsc --noEmit"
+    "type-check": "tsc --noEmit",
+    "scrape:discover": "tsx scripts/scrape-prime/1-discover.ts",
+    "scrape:fetch": "tsx scripts/scrape-prime/2-scrape.ts",
+    "scrape:images": "tsx scripts/scrape-prime/3-images.ts",
+    "scrape:mock": "tsx scripts/scrape-prime/4-write-mock.ts",
+    "scrape:all": "npm run scrape:discover && npm run scrape:fetch && npm run scrape:images && npm run scrape:mock"
   },
   "dependencies": {
     "@supabase/ssr": "^0.5.2",
@@ -25,10 +30,13 @@
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "autoprefixer": "^10.4.20",
+    "cheerio": "^1.2.0",
     "eslint": "^10.2.0",
     "eslint-config-next": "^16.2.2",
+    "p-limit": "^6.2.0",
     "postcss": "^8.4.47",
     "tailwindcss": "^3.4.14",
+    "tsx": "^4.21.0",
     "typescript": "^5.6.3"
   }
 }
