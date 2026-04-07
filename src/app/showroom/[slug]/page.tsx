@@ -1,13 +1,14 @@
 import { PageHeader } from "@/components/PageHeader";
 
-export default function ShowroomProductPage({
+export default async function ShowroomProductPage({
   params,
 }: {
-  params: { slug: string };
+  params: Promise<{ slug: string }>;
 }) {
+  const { slug } = await params;
   return (
     <div className="container-page">
-      <PageHeader title={`Showroom: ${decodeURIComponent(params.slug)}`} />
+      <PageHeader title={`Showroom: ${decodeURIComponent(slug)}`} />
     </div>
   );
 }
