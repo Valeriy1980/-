@@ -47,6 +47,24 @@ async function main() {
     process.exit(1);
   }
 
+  // Опціонально: AI-контент зі stage 6 (enrich). Якщо є — підхоплюємо описи.
+  interface EnrichedShape {
+    items?: Record<
+      string,
+      { description_short?: string; description_full?: string }
+    >;
+  }
+  const enriched = await readJson<EnrichedShape | null>(
+    dataPath("enriched"),
+    null,
+  );
+  const enrichedItems = enriched?.items ?? {};
+  if (Object.keys(enrichedItems).length > 0) {
+    console.log(
+      `  ✨ Підхоплено AI-контент для ${Object.keys(enrichedItems).length} товарів (enriched.json)`,
+    );
+  }
+
   // Опціонально: мапа категорій, отримана зі сторінок категорій (5-categories)
   const catData = await readJson<CategoriesFile | null>(
     dataPath("categories"),
@@ -183,6 +201,9 @@ async function main() {
     const brand_id = ensureBrand(p.brand);
     const now = new Date().toISOString();
 
+    // AI-контент має пріоритет над сирими описами зі скрапера.
+    const ai = enrichedItems[p.url];
+
     out.push({
       id: `p${prodCounter}`,
       name: p.name,
@@ -190,8 +211,8 @@ async function main() {
       sku: p.sku ?? `SKU-${prodCounter}`,
       brand_id,
       category_id,
-      description_short: p.description_short ?? null,
-      description_full: p.description_full ?? null,
+      description_short: ai?.description_short ?? p.description_short ?? null,
+      description_full: ai?.description_full ?? p.description_full ?? null,
       retail_price: p.retail_price ?? 0,
       wholesale_price: null,
       stock_quantity: p.in_stock === false ? 0 : 10,

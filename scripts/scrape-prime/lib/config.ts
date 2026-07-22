@@ -35,6 +35,7 @@ export const CONFIG = {
     products: "products.json", // розпарсені товари
     categories: "categories.json",
     brands: "brands.json",
+    enriched: "enriched.json", // AI-контент по товарах (stage 6)
     errors: "errors.log",
   },
 } as const;
