@@ -13,9 +13,56 @@
 | 1    | `npm run scrape:discover` | Читає `robots.txt`/`sitemap.xml`, збирає URL товарів       | `data/prime/urls.json`             |
 | 2    | `npm run scrape:fetch`    | Качає HTML кожного товару, парсить (JSON-LD + fallback)    | `data/prime/products.json` + `raw/`|
 | 3    | `npm run scrape:images`   | Качає всі фото з дедуплікацією                             | `public/imported/<sku>/*.{jpg,…}`  |
-| 4    | `npm run scrape:mock`     | Перетворює JSON у `src/lib/mock/products.ts`               | (перезаписує файл!)                |
+| 6    | `npm run scrape:enrich`   | **AI-двигун контенту**: Claude генерує описи, характеристики, SEO та профіль енергонезалежності | `data/prime/enriched.json` |
+| 4    | `npm run scrape:mock`     | Перетворює JSON у `src/lib/mock/products.ts` (підхоплює AI-описи, якщо є) | (перезаписує файл!)     |
 
-Або одним пострілом: `npm run scrape:all`
+Або одним пострілом:
+- `npm run scrape:all` — лише безкоштовний краулінг (discover → fetch → categories → mock)
+- `npm run scrape:all:ai` — те саме + AI-збагачення перед генерацією каталогу
+
+## AI-двигун контенту (stage 6)
+
+Найтрудомісткіша ручна робота в e-commerce — писати описи, характеристики,
+SEO й переклади для сотень товарів. Stage 6 віддає це Claude.
+
+Для кожного товару з `products.json` генерується:
+
+- **description_full / description_short** — фаховий опис українською в тоні бренду;
+- **highlights** — 3–5 ключових переваг;
+- **attributes** — нормалізовані характеристики (почищені, без дублів);
+- **seo** — title, meta-опис, ключові слова;
+- **energy** — профіль енергонезалежності: оцінка споживання, сумісність
+  з генератором/інвертором, наявність газової альтернативи. Це стратегічна
+  вісь для ринку України під час блекаутів.
+
+Результат кладеться в `data/prime/enriched.json` (ключ — URL товару).
+`scrape:mock` автоматично підхоплює звідти описи в каталог; решта полів
+(highlights, energy, seo, attributes) готові для наступного кроку —
+виведення на сторінку товару та імпорту в Supabase.
+
+### Запуск
+
+```bash
+# на вашому Mac, з інтернетом
+export ANTHROPIC_API_KEY=sk-ant-...   # або додайте в .env.local
+npm run scrape:enrich                 # обробить лише ще не збагачені товари
+npm run scrape:mock                   # перегенерує каталог з AI-описами
+npm run dev
+```
+
+### Налаштування (через оточення)
+
+- `ENRICH_MODEL` — модель. Дефолт `claude-opus-4-8` (найякісніше). Для великого
+  каталогу можна свідомо здешевити: `claude-haiku-4-5` або `claude-sonnet-5`.
+- `ENRICH_EFFORT` — глибина (`low`|`medium`|`high`). Дефолт `low` (швидко/дешево).
+- `ENRICH_CONCURRENCY` — паралельні запити. Дефолт `4`.
+
+### Стійкість
+
+Resumable: товари, які вже є в `enriched.json`, пропускаються — повторний запуск
+обробляє лише нові чи невдалі. Чекпойнт кожні 10 товарів; помилки логуються в
+`errors.log` і не зупиняють процес. Системний промпт кешується між товарами —
+це помітно здешевлює обробку великого каталогу.
 
 ## Запуск
 

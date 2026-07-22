@@ -13,9 +13,12 @@
     "scrape:images": "tsx scripts/scrape-prime/3-images.ts",
     "scrape:mock": "tsx scripts/scrape-prime/4-write-mock.ts",
     "scrape:categories": "tsx scripts/scrape-prime/5-categories.ts",
-    "scrape:all": "npm run scrape:discover && npm run scrape:fetch && npm run scrape:categories && npm run scrape:mock"
+    "scrape:enrich": "tsx scripts/scrape-prime/6-enrich.ts",
+    "scrape:all": "npm run scrape:discover && npm run scrape:fetch && npm run scrape:categories && npm run scrape:mock",
+    "scrape:all:ai": "npm run scrape:discover && npm run scrape:fetch && npm run scrape:categories && npm run scrape:enrich && npm run scrape:mock"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.113.0",
     "@supabase/ssr": "^0.5.2",
     "@supabase/supabase-js": "^2.45.4",
     "class-variance-authority": "^0.7.0",
